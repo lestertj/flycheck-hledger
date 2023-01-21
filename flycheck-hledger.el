@@ -30,6 +30,7 @@
 ;;; Code:
 
 (require 'flycheck)
+(require 'hledger-mode)
 
 (flycheck-def-option-var flycheck-hledger-strict nil hledger
   "Whether to enable strict mode.
@@ -57,63 +58,121 @@ https://hledger.org/hledger.html#check."
 
 (flycheck-define-checker hledger
   "A checker for errors in hledger journals, optionally with --strict checking and/or extra checks supported by the check command."
-  :modes (ledger-mode hledger-mode)
-  ;; Activate the checker only if ledger-binary-path ends with "hledger":
-  :predicate flycheck-hledger--enabled-p
-  :command ("hledger" "-f" source-inplace "--auto" "check"
+  :modes (ledger-mode hledger-mode):predicate
+  flycheck-hledger--enabled-p
+  :command ("hledger" "-f"
+            (eval hledger-jfile)
+            "--auto"
+            "check"
             (option-flag "--strict" flycheck-hledger-strict)
-            (eval flycheck-hledger-checks))
-  :error-filter (lambda (errors) (flycheck-sanitize-errors (flycheck-fill-empty-line-numbers errors)))
+            (eval flycheck-hledger-checks)):error-filter
+  (lambda (errors)
+    (flycheck-sanitize-errors (flycheck-fill-empty-line-numbers errors)))
   :error-parser flycheck-parse-with-patterns
-  :error-patterns
-  (
-   ;; hledger error messages are becoming more consistent, but still require a number of patterns.
-   ;; We try to support hledger 1.26 and newer.
-   ;; The typical format is a standard first line with possible error type, filename and line/column number(s),
-   ;; several lines of highlighted excerpt, and one or more lines of explanation.
-   ;; See https://github.com/simonmichael/hledger/tree/master/hledger/test/errors for examples.
+  :error-patterns (
+                    ;; hledger error messages are becoming more consistent, but still require a number of patterns.
+                    ;; We try to support hledger 1.26 and newer.
+                    ;; The typical format is a standard first line with possible error type, filename and line/column number(s),
+                    ;; several lines of highlighted excerpt, and one or more lines of explanation.
+                    ;; See https://github.com/simonmichael/hledger/tree/master/hledger/test/errors for examples.
 
-   ;; hledger 1.26
+                    ;; hledger 1.26
 
-   ;; hledger 1.26 assertions (:LINE:COL)
-   (error
-    bol "hledger: Error: balance assertion: " (file-name (minimal-match (one-or-more (not ":")))) ":" line ":" column "\n"
-    (message (one-or-more bol (zero-or-more nonl) "\n")))
+                    ;; hledger 1.26 assertions (:LINE:COL)
+                    (error bol
+                          "hledger: Error: balance assertion: "
+                          (file-name (minimal-match (one-or-more (not ":"))))
+                          ":"
+                          line
+                          ":"
+                          column
+                          "\n"
+                          (message (one-or-more bol
+                                                (zero-or-more nonl)
+                                                "\n")))
+                    ;; hledger 1.26 balancedwithautoconversion, balancednoautoconversion (:LINE-LINE)
+                    (error bol
+                          "hledger: Error: "
+                          (file-name (minimal-match (one-or-more (not ":"))))
+                          ":"
+                          line
+                          "-"
+                          end-line
+                          "\n"
+                          (message (one-or-more bol
+                                                (zero-or-more nonl)
+                                                "\n")))
+                    ;; hledger 1.26+
 
-   ;; hledger 1.26 balancedwithautoconversion, balancednoautoconversion (:LINE-LINE)
-   (error
-    bol "hledger: Error: " (file-name (minimal-match (one-or-more (not ":")))) ":" line "-" end-line "\n"
-    (message (one-or-more bol (zero-or-more nonl) "\n")))
+                    ;; hledger 1.26+ error with LINE-LINE:
+                    (error bol
+                          "hledger: Error: "
+                          (file-name (minimal-match (one-or-more (not ":"))))
+                          ":"
+                          line
+                          "-"
+                          end-line
+                          ":\n"
+                                      ; first line
+                          (one-or-more bol
+                                        (any space digit)
+                                        (zero-or-more nonl)
+                                        "\n") ; excerpt lines
+                          (message (one-or-more bol
+                                                (zero-or-more nonl)
+                                                "\n"))) ; message lines
 
-   ;; hledger 1.26+
-
-   ;; hledger 1.26+ error with LINE-LINE:
-   (error
-    bol "hledger: Error: " (file-name (minimal-match (one-or-more (not ":")))) ":" line "-" end-line ":\n" ; first line
-    (one-or-more bol (any space digit) (zero-or-more nonl) "\n")                                           ; excerpt lines
-    (message (one-or-more bol (zero-or-more nonl) "\n")))                                                  ; message lines
-
-   ;; hledger 1.26+ error with LINE:COL-COL:
-   (error
-    bol "hledger: Error: " (file-name (minimal-match (one-or-more (not ":")))) ":" line ":" column "-" end-column ":\n"
-    (one-or-more bol (any space digit) (zero-or-more nonl) "\n")
-    (message (one-or-more bol (zero-or-more nonl) "\n")))
-
-   ;; hledger 1.26+ error with LINE:COL:
-   (error
-    bol "hledger: Error: " (file-name (minimal-match (one-or-more (not ":")))) ":" line ":" column ":\n"
-    (one-or-more bol (any space digit) (zero-or-more nonl) "\n")
-    (message (one-or-more bol (zero-or-more nonl) "\n")))
-
-   ;; hledger 1.26+ error with LINE:
-   (error
-    bol "hledger: Error: " (file-name (minimal-match (one-or-more (not ":")))) ":" line ":\n"
-    (one-or-more bol (any space digit) (zero-or-more nonl) "\n")
-    (message (one-or-more bol (zero-or-more nonl) "\n")))))
-
+                    ;; hledger 1.26+ error with LINE:COL-COL:
+                    (error bol
+                          "hledger: Error: "
+                          (file-name (minimal-match (one-or-more (not ":"))))
+                          ":"
+                          line
+                          ":"
+                          column
+                          "-"
+                          end-column
+                          ":\n"
+                          (one-or-more bol
+                                        (any space digit)
+                                        (zero-or-more nonl)
+                                        "\n")
+                          (message (one-or-more bol
+                                                (zero-or-more nonl)
+                                                "\n")))
+                    ;; hledger 1.26+ error with LINE:COL:
+                    (error bol
+                          "hledger: Error: "
+                          (file-name (minimal-match (one-or-more (not ":"))))
+                          ":"
+                          line
+                          ":"
+                          column
+                          ":\n"
+                          (one-or-more bol
+                                        (any space digit)
+                                        (zero-or-more nonl)
+                                        "\n")
+                          (message (one-or-more bol
+                                                (zero-or-more nonl)
+                                                "\n")))
+                    ;; hledger 1.26+ error with LINE:
+                    (error bol
+                          "hledger: Error: "
+                          (file-name (minimal-match (one-or-more (not ":"))))
+                          ":"
+                          line
+                          ":\n"
+                          (one-or-more bol
+                                        (any space digit)
+                                        (zero-or-more nonl)
+                                        "\n")
+                          (message (one-or-more bol
+                                                (zero-or-more nonl)
+                                                "\n")))))
 (add-to-list 'flycheck-checkers 'hledger)
-
 (provide 'flycheck-hledger)
+
 ;;; flycheck-hledger.el ends here
 
 ;;; LocalWords:  flycheck-hledger
